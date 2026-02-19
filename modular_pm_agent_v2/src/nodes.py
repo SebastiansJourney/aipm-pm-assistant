@@ -110,10 +110,11 @@ def smart_scheduler_node(state: AgentState):
                 return {"items": target}
             return data
 
+    # IMPROVEMENT 1: Feed optimizer insights back into the Scheduler prompt,so previous optimization suggestions actually influence the next scheduling iteration.
     prompt = f"""
     Schedule tasks: {state['tasks']}
     Dependencies: {state.get('dependencies')}
-    
+    Previous Optimization Insights: {state.get('insights', [])}
     CRITICAL INSTRUCTIONS: 
     1. Return JSON with start/end days (integers).
     2. If circular dependency detected, BREAK THE LOOP and assign best guess integer.
@@ -209,7 +210,9 @@ def resource_allocation_node(state: AgentState):
                 return {"allocs": target}
             return data
 
-    prompt = f"Allocate tasks: {state['tasks']} to Team: {state['team']}. IMPORTANT: Return JSON."
+#IMPROVEMENT 1: Feed optimizer insights back into the Allocator prompt,
+# so previous optimization suggestions actually influence the next allocation iteration.
+    prompt = f"Allocate tasks: {state['tasks']} to Team: {state['team']}. Previous Optimization Insights: {state.get('insights', [])}. IMPORTANT: Return JSON."
     struct_llm = llm.with_structured_output(SimpleAlloc, method="json_mode")
     resp = struct_llm.invoke(prompt)
 
