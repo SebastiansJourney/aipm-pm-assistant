@@ -1,5 +1,6 @@
 import uuid
 from typing import List, Any, Optional, Annotated
+from patsy import state
 from pydantic import BaseModel, Field, AliasChoices, model_validator, BeforeValidator
 from src.config import llm
 from src.models import (
@@ -210,9 +211,21 @@ def resource_allocation_node(state: AgentState):
                 return {"allocs": target}
             return data
 
-#IMPROVEMENT 1: Feed optimizer insights back into the Allocator prompt,
+# IMPROVEMENT 1: Feed optimizer insights back into the Allocator prompt,
 # so previous optimization suggestions actually influence the next allocation iteration.
-    prompt = f"Allocate tasks: {state['tasks']} to Team: {state['team']}. Previous Optimization Insights: {state.get('insights', [])}. IMPORTANT: Return JSON."
+# IMPROVEMENT 4: Add explicit skill matching instructions to the Allocator prompt
+# for better and more realistic task assignments.
+    prompt = f"""
+    Allocate tasks: {state['tasks']} to Team: {state['team']}.
+    
+    ALLOCATION RULES:
+    1. Match each task's required_skill to the team member's skills list.
+    2. Distribute tasks evenly — avoid overloading one person.
+    3. Prefer Senior members for complex or high-risk tasks.
+    4. Previous Optimization Insights: {state.get('insights', [])}.
+    
+    IMPORTANT: Return JSON.
+    """
     struct_llm = llm.with_structured_output(SimpleAlloc, method="json_mode")
     resp = struct_llm.invoke(prompt)
 
