@@ -7,8 +7,11 @@ from src.nodes import (
     risk_audit_node, optimization_insight_node
 )
 
+# IMPROVEMENT 2: Add a fallback check for empty project_risk_score_iterations
+# to prevent an IndexError crash if the list is somehow empty.
 def routing_logic(state: AgentState):
-    # Stop if max iterations reached or risk score is low (< 15)
+    if not state['project_risk_score_iterations']:
+        return END
     last_score = state['project_risk_score_iterations'][-1]
     if state["iteration_number"] >= state["max_iteration"] or last_score < 15:
         return END
