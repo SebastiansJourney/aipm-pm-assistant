@@ -25,9 +25,14 @@ def main():
     graph = build_graph()
     
     print("Running Agent...")
-    final_state = graph.invoke(init_state, {"configurable": {"thread_id": "prod_v1"}})
-    
-    print("Workflow Finished!")
+    # IMPROVEMENT 5: Wrap graph.invoke() in try/except to catch and display
+    # errors clearly instead of crashing silently mid-run.
+    try:
+        final_state = graph.invoke(init_state, {"configurable": {"thread_id": "prod_v1"}})
+        print("Workflow Finished!")
+    except Exception as e:
+        print(f"Agent failed with error: {e}")
+        return
     
     # 4. Report
     visualize_results(final_state)
