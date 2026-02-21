@@ -131,34 +131,29 @@ def smart_scheduler_node(state: AgentState):
                 return {"items": target}
             return data
 
-    # IMPROVEMENT 1: Feed optimizer insights back into the Scheduler prompt,
-    # so previous optimization suggestions actually influence the next scheduling iteration.
+   # IMPROVEMENT 1: Feed optimizer insights back into the Allocator prompt,
+    # so previous optimization suggestions actually influence the next allocation iteration.
+    # IMPROVEMENT 4: Add explicit skill matching instructions to the Allocator prompt
+    # for better and more realistic task assignments.
     prompt = f"""
-    Schedule tasks: {state['tasks']}
-    Dependencies: {state.get('dependencies')}
-    Previous Optimization Insights: {state.get('insights', [])}
+    Allocate the following tasks to team members based on skills.
 
-    CRITICAL INSTRUCTIONS:
-    1. Return JSON with start/end days (integers).
-    2. If circular dependency detected, BREAK THE LOOP and assign best guess integer.
-    3. DO NOT return null. Start day must be an integer (0, 1, 2...).
+    Tasks: {state['tasks']}
+    Team: {state['team']}
+
+    ALLOCATION RULES:
+    1. Match each task's required_skill to the team member's skills list.
+    2. Distribute tasks evenly — avoid overloading one person.
+    3. Prefer Senior members for complex or high-risk tasks.
+    4. Previous Optimization Insights: {state.get('insights', [])}.
+    5. Return ONLY a JSON object with an "allocs" key containing a list.
+    6. Each item must have EXACTLY these fields:
+       - "task_id": the task ID (string)
+       - "member_name": the team member's name (string)
+
+    Example format:
+    {{"allocs": [{{"task_id": "1", "member_name": "Alice"}}, {{"task_id": "2", "member_name": "Bob"}}]}}
     """
-    struct_llm = llm.with_structured_output(SimpleSched, method="json_mode")
-    resp = struct_llm.invoke(prompt)
-
-    task_map = {t.id: t for t in state["tasks"].task}
-    task_map.update({t.task_name: t for t in state["tasks"].task})
-
-    final_sched = []
-    for item in resp.items:
-        task = task_map.get(str(item.task_id))
-        if task:
-            s = item.start if item.start >= 0 else 0
-            e = item.end if item.end >= 0 else s + 1
-            final_sched.append(TaskSchedule(task=task, start_day=s, end_day=e))
-
-    return {"schedule": Schedule(schedule=final_sched)}
-
 
 # --- 4. Allocator ---
 def resource_allocation_node(state: AgentState):
