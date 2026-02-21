@@ -214,32 +214,21 @@ def resource_allocation_node(state: AgentState):
 # so previous optimization suggestions actually influence the next allocation iteration.
 # IMPROVEMENT 4: Add explicit skill matching instructions to the Allocator prompt
 # for better and more realistic task assignments.
-    prompt = f"""
-    Allocate tasks: {state['tasks']} to Team: {state['team']}.
-    
-    ALLOCATION RULES:
-    1. Match each task's required_skill to the team member's skills list.
-    2. Distribute tasks evenly — avoid overloading one person.
-    3. Prefer Senior members for complex or high-risk tasks.
-    4. Previous Optimization Insights: {state.get('insights', [])}.
-    
-    IMPORTANT: Return JSON.
-    """
-    struct_llm = llm.with_structured_output(SimpleAlloc, method="json_mode")
-    resp = struct_llm.invoke(prompt)
+   prompt = f"""
+Map dependencies for the following tasks:
+{tasks_fmt}
 
-    task_map = {t.id: t for t in state["tasks"].task}
-    task_map.update({t.task_name: t for t in state["tasks"].task})
-    member_map = {m.name: m for m in state["team"].team_members}
+STRICT RULES:
+1. Return ONLY a JSON object with a "dependencies" key containing a list.
+2. Each item must have exactly these fields:
+   - "task_id": the ID of the task (string)
+   - "dependent_on": a list of task IDs this task depends on (use empty list [] if none)
+3. Every task ID in the list above must appear exactly once.
+4. Do NOT add any explanation or text outside the JSON.
 
-    final_allocs = []
-    for a in resp.allocs:
-        task = task_map.get(str(a.task_id))
-        member = member_map.get(a.member_name)
-        if task and member:
-            final_allocs.append(TaskAllocation(task=task, team_member=member))
-
-    return {"task_allocations": TaskAllocationList(task_allocations=final_allocs)}
+Example format:
+{{"dependencies": [{{"task_id": "1", "dependent_on": []}}, {{"task_id": "2", "dependent_on": ["1"]}}]}}
+"""
 
 
 # --- 5. Auditor ---
