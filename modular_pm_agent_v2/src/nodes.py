@@ -51,12 +51,18 @@ def scope_decomposition_node(state: AgentState):
     Team Skills: {[m.skills for m in state['team'].team_members]}
     
     DECOMPOSITION RULES:
-    1. Break the project into **AT LEAST 10-15 granular tasks**.
-    2. No task should exceed 3 days. If a task is longer, break it down further.
-    3. Include specific tasks for: Setup, Database, API, Frontend Components, Testing, Security, and Deployment.
-    4. REQUIRED JSON FIELDS: 'task_name', 'task_description', 'estimated_day', 'required_skill'.
-    
-    Return a comprehensive JSON list.
+    1. Break the project into AT LEAST 10-15 granular tasks.
+    2. No task should exceed 3 days. If longer, break it down further.
+    3. Include tasks for: Setup, Database, API, Frontend, Testing, Security, Deployment.
+    4. Return ONLY a JSON object with a "tasks" key containing a list.
+    5. Each task must have EXACTLY these fields:
+       - "task_name": string
+       - "task_description": string
+       - "estimated_day": integer (1, 2, or 3)
+       - "required_skill": string (single skill, not a list)
+
+    Example format:
+    {{"tasks": [{{"task_name": "Setup Repo", "task_description": "Initialize git repo", "estimated_day": 1, "required_skill": "Python"}}]}}
     """
     struct_llm = llm.with_structured_output(TaskList, method="json_mode")
     response = struct_llm.invoke(prompt)
