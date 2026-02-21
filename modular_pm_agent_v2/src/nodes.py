@@ -1,6 +1,5 @@
 import uuid
 from typing import List, Any, Optional, Annotated
-from patsy import state
 from pydantic import BaseModel, Field, AliasChoices, model_validator, BeforeValidator
 from src.config import llm
 from src.models import (

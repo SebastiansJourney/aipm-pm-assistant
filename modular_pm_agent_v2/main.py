@@ -16,6 +16,7 @@ def main():
         "team": my_team,
         "iteration_number": 0,
         "max_iteration": 2,
+        "risk_threshold": 15,
         "insights": [],
         "project_risk_score_iterations": []
     }

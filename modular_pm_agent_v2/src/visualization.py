@@ -91,14 +91,22 @@ def visualize_results(final_state):
                 margin=dict(l=150, r=50, t=80, b=50),  # Extra space for long task names
             )
 
+            # Try Jupyter first
             try:
-                from IPython.display import display
-
                 get_ipython()
                 fig.show()
-            except (ImportError, NameError):
-                output_file = "project_schedule.html"
-                fig.write_html(output_file)
-                print(f"\n[INFO] Gantt chart saved to '{output_file}'")
+            except NameError:
+                # Try Streamlit
+                try:
+                    import streamlit as st
+                    from streamlit.runtime.scriptrunner import get_script_run_ctx
+                    if get_script_run_ctx() is not None:
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        raise RuntimeError("Not in active Streamlit session")
+                except (ImportError, RuntimeError):
+                    output_file = "project_schedule.html"
+                    fig.write_html(output_file)
+                    print(f"\n[INFO] Gantt chart saved to '{output_file}'")
     else:
         print("\n[ERROR] No tasks found to plot.")

@@ -15,7 +15,7 @@ def routing_logic(state: AgentState):
     last_score = state['project_risk_score_iterations'][-1]
     # IMPROVEMENT 3: Log current iteration and risk score for better visibility during runs.
     print(f"--- Routing Check | Iteration: {state['iteration_number']} | Risk Score: {last_score} ---")
-    if state["iteration_number"] >= state["max_iteration"] or last_score < 15:
+    if state["iteration_number"] >= state["max_iteration"] or last_score < state["risk_threshold"]:
         return END
     return "optimizer"
 
