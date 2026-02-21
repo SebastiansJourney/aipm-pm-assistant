@@ -75,7 +75,22 @@ def dependency_mapping_node(state: AgentState):
     tasks_fmt = "\n".join(
         [f"ID: {t.id} | Name: {t.task_name}" for t in state["tasks"].task]
     )
-    prompt = f"Map dependencies for:\n{tasks_fmt}\nReturn JSON matching DependencyList. Use IDs."
+    # IMPROVEMENT: Explicit JSON structure and example for smaller models
+    prompt = f"""
+Map dependencies for the following tasks:
+{tasks_fmt}
+
+STRICT RULES:
+1. Return ONLY a JSON object with a "dependencies" key containing a list.
+2. Each item must have exactly these fields:
+   - "task_id": the ID of the task (string)
+   - "dependent_on": a list of task IDs this task depends on (use empty list [] if none)
+3. Every task ID in the list above must appear exactly once.
+4. Do NOT add any explanation or text outside the JSON.
+
+Example format:
+{{"dependencies": [{{"task_id": "1", "dependent_on": []}}, {{"task_id": "2", "dependent_on": ["1"]}}]}}
+"""
     struct_llm = llm.with_structured_output(DependencyList, method="json_mode")
     response = struct_llm.invoke(prompt)
     return {"dependencies": response.dependencies}
@@ -110,12 +125,14 @@ def smart_scheduler_node(state: AgentState):
                 return {"items": target}
             return data
 
-    # IMPROVEMENT 1: Feed optimizer insights back into the Scheduler prompt,so previous optimization suggestions actually influence the next scheduling iteration.
+    # IMPROVEMENT 1: Feed optimizer insights back into the Scheduler prompt,
+    # so previous optimization suggestions actually influence the next scheduling iteration.
     prompt = f"""
     Schedule tasks: {state['tasks']}
     Dependencies: {state.get('dependencies')}
     Previous Optimization Insights: {state.get('insights', [])}
-    CRITICAL INSTRUCTIONS: 
+
+    CRITICAL INSTRUCTIONS:
     1. Return JSON with start/end days (integers).
     2. If circular dependency detected, BREAK THE LOOP and assign best guess integer.
     3. DO NOT return null. Start day must be an integer (0, 1, 2...).
@@ -179,14 +196,12 @@ def resource_allocation_node(state: AgentState):
             # 2. Handle Dict/Map formats
             if isinstance(target, dict):
                 # FIX: Check for "Person-Centric" grouping: {"Alice": [{"task_id": "1"}, ...]}
-                # Detect if values are Lists
                 first_val = next(iter(target.values()), None)
                 if isinstance(first_val, list):
                     flattened = []
                     for member, tasks in target.items():
                         if isinstance(tasks, list):
                             for t in tasks:
-                                # Extract task_id from the nested dict
                                 t_id = t.get("task_id") or t.get("id") or t.get("task")
                                 if t_id:
                                     flattened.append(
@@ -210,25 +225,36 @@ def resource_allocation_node(state: AgentState):
                 return {"allocs": target}
             return data
 
-# IMPROVEMENT 1: Feed optimizer insights back into the Allocator prompt,
-# so previous optimization suggestions actually influence the next allocation iteration.
-# IMPROVEMENT 4: Add explicit skill matching instructions to the Allocator prompt
-# for better and more realistic task assignments.
-   prompt = f"""
-Map dependencies for the following tasks:
-{tasks_fmt}
+    # IMPROVEMENT 1: Feed optimizer insights back into the Allocator prompt,
+    # so previous optimization suggestions actually influence the next allocation iteration.
+    # IMPROVEMENT 4: Add explicit skill matching instructions to the Allocator prompt
+    # for better and more realistic task assignments.
+    prompt = f"""
+    Allocate tasks: {state['tasks']} to Team: {state['team']}.
 
-STRICT RULES:
-1. Return ONLY a JSON object with a "dependencies" key containing a list.
-2. Each item must have exactly these fields:
-   - "task_id": the ID of the task (string)
-   - "dependent_on": a list of task IDs this task depends on (use empty list [] if none)
-3. Every task ID in the list above must appear exactly once.
-4. Do NOT add any explanation or text outside the JSON.
+    ALLOCATION RULES:
+    1. Match each task's required_skill to the team member's skills list.
+    2. Distribute tasks evenly — avoid overloading one person.
+    3. Prefer Senior members for complex or high-risk tasks.
+    4. Previous Optimization Insights: {state.get('insights', [])}.
 
-Example format:
-{{"dependencies": [{{"task_id": "1", "dependent_on": []}}, {{"task_id": "2", "dependent_on": ["1"]}}]}}
-"""
+    IMPORTANT: Return JSON.
+    """
+    struct_llm = llm.with_structured_output(SimpleAlloc, method="json_mode")
+    resp = struct_llm.invoke(prompt)
+
+    task_map = {t.id: t for t in state["tasks"].task}
+    task_map.update({t.task_name: t for t in state["tasks"].task})
+    member_map = {m.name: m for m in state["team"].team_members}
+
+    final_allocs = []
+    for a in resp.allocs:
+        task = task_map.get(str(a.task_id))
+        member = member_map.get(a.member_name)
+        if task and member:
+            final_allocs.append(TaskAllocation(task=task, team_member=member))
+
+    return {"task_allocations": TaskAllocationList(task_allocations=final_allocs)}
 
 
 # --- 5. Auditor ---
