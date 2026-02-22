@@ -1,4 +1,5 @@
 import uuid
+import time
 from typing import List, Any, Optional, Annotated
 from pydantic import BaseModel, Field, AliasChoices, model_validator, BeforeValidator
 from src.config import llm
@@ -45,11 +46,12 @@ SafeInt = Annotated[int, BeforeValidator(force_int)]
 
 # --- 1. Scoper ---
 def scope_decomposition_node(state: AgentState):
+    time.sleep(3)
     print("--- Node: Scoper ---")
     prompt = f"""
     Project: {state['project_description']}
     Team Skills: {[m.skills for m in state['team'].team_members]}
-    
+
     DECOMPOSITION RULES:
     1. Break the project into AT LEAST 10-15 granular tasks.
     2. No task should exceed 3 days. If longer, break it down further.
@@ -77,11 +79,12 @@ def scope_decomposition_node(state: AgentState):
 
 # --- 2. Mapper ---
 def dependency_mapping_node(state: AgentState):
+    time.sleep(3)
     print("--- Node: Mapper ---")
     tasks_fmt = "\n".join(
         [f"ID: {t.id} | Name: {t.task_name}" for t in state["tasks"].task]
     )
-    # IMPROVEMENT: Explicit JSON structure and example for smaller models
+    # IMPROVEMENT: Explicit JSON structure and example for reliable output
     prompt = f"""
 Map dependencies for the following tasks:
 {tasks_fmt}
@@ -104,6 +107,7 @@ Example format:
 
 # --- 3. Scheduler ---
 def smart_scheduler_node(state: AgentState):
+    time.sleep(3)
     print("--- Node: Scheduler ---")
 
     class SimpleSchedItem(BaseModel):
@@ -131,32 +135,38 @@ def smart_scheduler_node(state: AgentState):
                 return {"items": target}
             return data
 
-   # IMPROVEMENT 1: Feed optimizer insights back into the Allocator prompt,
-    # so previous optimization suggestions actually influence the next allocation iteration.
-    # IMPROVEMENT 4: Add explicit skill matching instructions to the Allocator prompt
-    # for better and more realistic task assignments.
+    # IMPROVEMENT 1: Feed optimizer insights back into the Scheduler prompt,
+    # so previous optimization suggestions actually influence the next scheduling iteration.
     prompt = f"""
-    Allocate the following tasks to team members based on skills.
+    Schedule tasks: {state['tasks']}
+    Dependencies: {state.get('dependencies')}
+    Previous Optimization Insights: {state.get('insights', [])}
 
-    Tasks: {state['tasks']}
-    Team: {state['team']}
-
-    ALLOCATION RULES:
-    1. Match each task's required_skill to the team member's skills list.
-    2. Distribute tasks evenly — avoid overloading one person.
-    3. Prefer Senior members for complex or high-risk tasks.
-    4. Previous Optimization Insights: {state.get('insights', [])}.
-    5. Return ONLY a JSON object with an "allocs" key containing a list.
-    6. Each item must have EXACTLY these fields:
-       - "task_id": the task ID (string)
-       - "member_name": the team member's name (string)
-
-    Example format:
-    {{"allocs": [{{"task_id": "1", "member_name": "Alice"}}, {{"task_id": "2", "member_name": "Bob"}}]}}
+    CRITICAL INSTRUCTIONS:
+    1. Return JSON with start/end days (integers).
+    2. If circular dependency detected, BREAK THE LOOP and assign best guess integer.
+    3. DO NOT return null. Start day must be an integer (0, 1, 2...).
     """
+    struct_llm = llm.with_structured_output(SimpleSched, method="json_mode")
+    resp = struct_llm.invoke(prompt)
+
+    task_map = {t.id: t for t in state["tasks"].task}
+    task_map.update({t.task_name: t for t in state["tasks"].task})
+
+    final_sched = []
+    for item in resp.items:
+        task = task_map.get(str(item.task_id))
+        if task:
+            s = item.start if item.start >= 0 else 0
+            e = item.end if item.end >= 0 else s + 1
+            final_sched.append(TaskSchedule(task=task, start_day=s, end_day=e))
+
+    return {"schedule": Schedule(schedule=final_sched)}
+
 
 # --- 4. Allocator ---
 def resource_allocation_node(state: AgentState):
+    time.sleep(3)
     print("--- Node: Allocator ---")
 
     class SimpleAllocItem(BaseModel):
@@ -180,7 +190,6 @@ def resource_allocation_node(state: AgentState):
         @classmethod
         def wrap(cls, data):
             target = data
-            # 1. Unwrap known keys
             if isinstance(data, dict):
                 for key in [
                     "allocations",
@@ -194,9 +203,7 @@ def resource_allocation_node(state: AgentState):
                         target = data[key]
                         break
 
-            # 2. Handle Dict/Map formats
             if isinstance(target, dict):
-                # FIX: Check for "Person-Centric" grouping: {"Alice": [{"task_id": "1"}, ...]}
                 first_val = next(iter(target.values()), None)
                 if isinstance(first_val, list):
                     flattened = []
@@ -211,7 +218,6 @@ def resource_allocation_node(state: AgentState):
                     if flattened:
                         return {"allocs": flattened}
 
-                # Case: Simple Map { "Task1": "Alice" }
                 if all(isinstance(v, str) for v in target.values()):
                     return {
                         "allocs": [
@@ -219,7 +225,6 @@ def resource_allocation_node(state: AgentState):
                         ]
                     }
 
-                # Case: Nested Object Map { "Task1": {"assignee": "Alice"} }
                 return {"allocs": standardize_to_list(target, key_alias="task_id")}
 
             if isinstance(target, list):
@@ -231,15 +236,23 @@ def resource_allocation_node(state: AgentState):
     # IMPROVEMENT 4: Add explicit skill matching instructions to the Allocator prompt
     # for better and more realistic task assignments.
     prompt = f"""
-    Allocate tasks: {state['tasks']} to Team: {state['team']}.
+    Allocate the following tasks to team members based on skills.
+
+    Tasks: {state['tasks']}
+    Team: {state['team']}
 
     ALLOCATION RULES:
     1. Match each task's required_skill to the team member's skills list.
     2. Distribute tasks evenly — avoid overloading one person.
     3. Prefer Senior members for complex or high-risk tasks.
     4. Previous Optimization Insights: {state.get('insights', [])}.
+    5. Return ONLY a JSON object with an "allocs" key containing a list.
+    6. Each item must have EXACTLY these fields:
+       - "task_id": the task ID (string)
+       - "member_name": the team member's name (string)
 
-    IMPORTANT: Return JSON.
+    Example format:
+    {{"allocs": [{{"task_id": "1", "member_name": "Alice"}}, {{"task_id": "2", "member_name": "Bob"}}]}}
     """
     struct_llm = llm.with_structured_output(SimpleAlloc, method="json_mode")
     resp = struct_llm.invoke(prompt)
@@ -260,6 +273,7 @@ def resource_allocation_node(state: AgentState):
 
 # --- 5. Auditor ---
 def risk_audit_node(state: AgentState):
+    time.sleep(3)
     print("--- Node: Auditor ---")
 
     def repair_risk_item(item: Any) -> Any:
@@ -330,6 +344,7 @@ def risk_audit_node(state: AgentState):
 
 # --- 6. Optimizer ---
 def optimization_insight_node(state: AgentState):
+    time.sleep(3)
     print("--- Node: Optimizer ---")
     prompt = f"Risks: {state['risks']}. Suggest 1 concrete change to lower risk."
     insight = llm.invoke(prompt).content

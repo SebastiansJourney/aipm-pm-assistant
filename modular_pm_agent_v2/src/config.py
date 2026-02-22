@@ -14,7 +14,7 @@ if "GROQ_API_KEY" not in os.environ:
         pass
 
 # Setup the LLM
-LLM_MODEL = "llama-3.1-8b-instant"
+LLM_MODEL = "llama-3.3-70b-versatile"
 TEMPERATURE = 0.3
 
 llm = ChatGroq(model=LLM_MODEL, temperature=TEMPERATURE)
