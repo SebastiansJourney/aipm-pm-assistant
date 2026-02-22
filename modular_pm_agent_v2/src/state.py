@@ -11,5 +11,6 @@ class AgentState(TypedDict):
     risks: RiskList
     iteration_number: int
     max_iteration: int
+    risk_threshold: int
     insights: List[str]
     project_risk_score_iterations: List[int]

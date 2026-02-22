@@ -1,6 +1,6 @@
 import uuid
+import time
 from typing import List, Any, Optional, Annotated
-from patsy import state
 from pydantic import BaseModel, Field, AliasChoices, model_validator, BeforeValidator
 from src.config import llm
 from src.models import (
@@ -46,18 +46,25 @@ SafeInt = Annotated[int, BeforeValidator(force_int)]
 
 # --- 1. Scoper ---
 def scope_decomposition_node(state: AgentState):
+    time.sleep(3)
     print("--- Node: Scoper ---")
     prompt = f"""
     Project: {state['project_description']}
     Team Skills: {[m.skills for m in state['team'].team_members]}
-    
+
     DECOMPOSITION RULES:
-    1. Break the project into **AT LEAST 10-15 granular tasks**.
-    2. No task should exceed 3 days. If a task is longer, break it down further.
-    3. Include specific tasks for: Setup, Database, API, Frontend Components, Testing, Security, and Deployment.
-    4. REQUIRED JSON FIELDS: 'task_name', 'task_description', 'estimated_day', 'required_skill'.
-    
-    Return a comprehensive JSON list.
+    1. Break the project into AT LEAST 10-15 granular tasks.
+    2. No task should exceed 3 days. If longer, break it down further.
+    3. Include tasks for: Setup, Database, API, Frontend, Testing, Security, Deployment.
+    4. Return ONLY a JSON object with a "tasks" key containing a list.
+    5. Each task must have EXACTLY these fields:
+       - "task_name": string
+       - "task_description": string
+       - "estimated_day": integer (1, 2, or 3)
+       - "required_skill": string (single skill, not a list)
+
+    Example format:
+    {{"tasks": [{{"task_name": "Setup Repo", "task_description": "Initialize git repo", "estimated_day": 1, "required_skill": "Python"}}]}}
     """
     struct_llm = llm.with_structured_output(TaskList, method="json_mode")
     response = struct_llm.invoke(prompt)
@@ -72,11 +79,27 @@ def scope_decomposition_node(state: AgentState):
 
 # --- 2. Mapper ---
 def dependency_mapping_node(state: AgentState):
+    time.sleep(3)
     print("--- Node: Mapper ---")
     tasks_fmt = "\n".join(
         [f"ID: {t.id} | Name: {t.task_name}" for t in state["tasks"].task]
     )
-    prompt = f"Map dependencies for:\n{tasks_fmt}\nReturn JSON matching DependencyList. Use IDs."
+    # IMPROVEMENT: Explicit JSON structure and example for reliable output
+    prompt = f"""
+Map dependencies for the following tasks:
+{tasks_fmt}
+
+STRICT RULES:
+1. Return ONLY a JSON object with a "dependencies" key containing a list.
+2. Each item must have exactly these fields:
+   - "task_id": the ID of the task (string)
+   - "dependent_on": a list of task IDs this task depends on (use empty list [] if none)
+3. Every task ID in the list above must appear exactly once.
+4. Do NOT add any explanation or text outside the JSON.
+
+Example format:
+{{"dependencies": [{{"task_id": "1", "dependent_on": []}}, {{"task_id": "2", "dependent_on": ["1"]}}]}}
+"""
     struct_llm = llm.with_structured_output(DependencyList, method="json_mode")
     response = struct_llm.invoke(prompt)
     return {"dependencies": response.dependencies}
@@ -84,6 +107,7 @@ def dependency_mapping_node(state: AgentState):
 
 # --- 3. Scheduler ---
 def smart_scheduler_node(state: AgentState):
+    time.sleep(3)
     print("--- Node: Scheduler ---")
 
     class SimpleSchedItem(BaseModel):
@@ -111,12 +135,14 @@ def smart_scheduler_node(state: AgentState):
                 return {"items": target}
             return data
 
-    # IMPROVEMENT 1: Feed optimizer insights back into the Scheduler prompt,so previous optimization suggestions actually influence the next scheduling iteration.
+    # IMPROVEMENT 1: Feed optimizer insights back into the Scheduler prompt,
+    # so previous optimization suggestions actually influence the next scheduling iteration.
     prompt = f"""
     Schedule tasks: {state['tasks']}
     Dependencies: {state.get('dependencies')}
     Previous Optimization Insights: {state.get('insights', [])}
-    CRITICAL INSTRUCTIONS: 
+
+    CRITICAL INSTRUCTIONS:
     1. Return JSON with start/end days (integers).
     2. If circular dependency detected, BREAK THE LOOP and assign best guess integer.
     3. DO NOT return null. Start day must be an integer (0, 1, 2...).
@@ -140,6 +166,7 @@ def smart_scheduler_node(state: AgentState):
 
 # --- 4. Allocator ---
 def resource_allocation_node(state: AgentState):
+    time.sleep(3)
     print("--- Node: Allocator ---")
 
     class SimpleAllocItem(BaseModel):
@@ -163,7 +190,6 @@ def resource_allocation_node(state: AgentState):
         @classmethod
         def wrap(cls, data):
             target = data
-            # 1. Unwrap known keys
             if isinstance(data, dict):
                 for key in [
                     "allocations",
@@ -177,17 +203,13 @@ def resource_allocation_node(state: AgentState):
                         target = data[key]
                         break
 
-            # 2. Handle Dict/Map formats
             if isinstance(target, dict):
-                # FIX: Check for "Person-Centric" grouping: {"Alice": [{"task_id": "1"}, ...]}
-                # Detect if values are Lists
                 first_val = next(iter(target.values()), None)
                 if isinstance(first_val, list):
                     flattened = []
                     for member, tasks in target.items():
                         if isinstance(tasks, list):
                             for t in tasks:
-                                # Extract task_id from the nested dict
                                 t_id = t.get("task_id") or t.get("id") or t.get("task")
                                 if t_id:
                                     flattened.append(
@@ -196,7 +218,6 @@ def resource_allocation_node(state: AgentState):
                     if flattened:
                         return {"allocs": flattened}
 
-                # Case: Simple Map { "Task1": "Alice" }
                 if all(isinstance(v, str) for v in target.values()):
                     return {
                         "allocs": [
@@ -204,27 +225,34 @@ def resource_allocation_node(state: AgentState):
                         ]
                     }
 
-                # Case: Nested Object Map { "Task1": {"assignee": "Alice"} }
                 return {"allocs": standardize_to_list(target, key_alias="task_id")}
 
             if isinstance(target, list):
                 return {"allocs": target}
             return data
 
-# IMPROVEMENT 1: Feed optimizer insights back into the Allocator prompt,
-# so previous optimization suggestions actually influence the next allocation iteration.
-# IMPROVEMENT 4: Add explicit skill matching instructions to the Allocator prompt
-# for better and more realistic task assignments.
+    # IMPROVEMENT 1: Feed optimizer insights back into the Allocator prompt,
+    # so previous optimization suggestions actually influence the next allocation iteration.
+    # IMPROVEMENT 4: Add explicit skill matching instructions to the Allocator prompt
+    # for better and more realistic task assignments.
     prompt = f"""
-    Allocate tasks: {state['tasks']} to Team: {state['team']}.
-    
+    Allocate the following tasks to team members based on skills.
+
+    Tasks: {state['tasks']}
+    Team: {state['team']}
+
     ALLOCATION RULES:
     1. Match each task's required_skill to the team member's skills list.
     2. Distribute tasks evenly — avoid overloading one person.
     3. Prefer Senior members for complex or high-risk tasks.
     4. Previous Optimization Insights: {state.get('insights', [])}.
-    
-    IMPORTANT: Return JSON.
+    5. Return ONLY a JSON object with an "allocs" key containing a list.
+    6. Each item must have EXACTLY these fields:
+       - "task_id": the task ID (string)
+       - "member_name": the team member's name (string)
+
+    Example format:
+    {{"allocs": [{{"task_id": "1", "member_name": "Alice"}}, {{"task_id": "2", "member_name": "Bob"}}]}}
     """
     struct_llm = llm.with_structured_output(SimpleAlloc, method="json_mode")
     resp = struct_llm.invoke(prompt)
@@ -245,6 +273,7 @@ def resource_allocation_node(state: AgentState):
 
 # --- 5. Auditor ---
 def risk_audit_node(state: AgentState):
+    time.sleep(3)
     print("--- Node: Auditor ---")
 
     def repair_risk_item(item: Any) -> Any:
@@ -315,6 +344,7 @@ def risk_audit_node(state: AgentState):
 
 # --- 6. Optimizer ---
 def optimization_insight_node(state: AgentState):
+    time.sleep(3)
     print("--- Node: Optimizer ---")
     prompt = f"Risks: {state['risks']}. Suggest 1 concrete change to lower risk."
     insight = llm.invoke(prompt).content

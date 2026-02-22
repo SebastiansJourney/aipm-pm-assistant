@@ -15,18 +15,28 @@ def visualize_results(final_state):
     for m in final_state["team"].team_members:
         print(f"└── {m.name} ({m.role})")
 
+    # GUARD: Check schedule and allocations exist before proceeding
+    if not final_state.get("schedule") or not final_state["schedule"].schedule:
+        print("\n[ERROR] No schedule was generated. Cannot visualize.")
+        try:
+            import streamlit as st
+            st.error("The agent did not generate a schedule. Please try again.")
+        except ImportError:
+            pass
+        return
+
     # --- Prepare Data ---
     sched_data = []
     start_date_base = datetime.now().replace(hour=8, minute=0, second=0, microsecond=0)
 
     # 1. Create Lookup Maps
-    # Map Task ID -> Schedule Item
+    # Map Task Name -> Schedule Item
     sched_map = {item.task.task_name: item for item in final_state["schedule"].schedule}
-    # Map Task ID -> Assignee Name
+    # Map Task Name -> Assignee Name
     alloc_map = {
         a.task.task_name: a.team_member.name
         for a in final_state["task_allocations"].task_allocations
-    }
+    } if final_state.get("task_allocations") else {}
 
     # 2. Iterate through ALL tasks (Master List) so nothing is missing
     for task in final_state["tasks"].task:
@@ -88,17 +98,25 @@ def visualize_results(final_state):
                 bargap=0.2,
                 legend_title_text="Team Member",
                 font=dict(family="Arial", size=12),
-                margin=dict(l=150, r=50, t=80, b=50),  # Extra space for long task names
+                margin=dict(l=150, r=50, t=80, b=50),
             )
 
+            # Try Jupyter first
             try:
-                from IPython.display import display
-
                 get_ipython()
                 fig.show()
-            except (ImportError, NameError):
-                output_file = "project_schedule.html"
-                fig.write_html(output_file)
-                print(f"\n[INFO] Gantt chart saved to '{output_file}'")
+            except NameError:
+                # Try Streamlit
+                try:
+                    import streamlit as st
+                    from streamlit.runtime.scriptrunner import get_script_run_ctx
+                    if get_script_run_ctx() is not None:
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        raise RuntimeError("Not in active Streamlit session")
+                except (ImportError, RuntimeError):
+                    output_file = "project_schedule.html"
+                    fig.write_html(output_file)
+                    print(f"\n[INFO] Gantt chart saved to '{output_file}'")
     else:
         print("\n[ERROR] No tasks found to plot.")
